@@ -2,21 +2,13 @@ import streamlit as st
 import pandas as pd
 import os
 from datetime import datetime
+from pyzbar.pyzbar import decode
+from PIL import Image
+import cv2
+import numpy as np
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 
-# Check required packages
-try:
-    from pyzbar.pyzbar import decode
-    from PIL import Image
-except ImportError:
-    st.error("""
-    Missing required packages. Please install them using:
-    ```
-    pip install pyzbar pillow
-    ```
-    Note: On Windows, you might also need to install the Visual C++ Redistributable package.
-    """)
-    st.stop()
-
+# Kiểm tra file Excel
 def check_excel_file():
     file_path = "D:/PYTHON CODE/taisan.xlsx"
     if not os.path.exists(file_path):
@@ -24,7 +16,7 @@ def check_excel_file():
         return False
     return True
 
-# Load data from Excel
+# Tải dữ liệu từ Excel
 try:
     file_path = "D:/PYTHON CODE/taisan.xlsx"
     df = pd.read_excel(file_path)
@@ -34,6 +26,7 @@ except Exception as e:
     st.error(f"Error loading Excel file: {str(e)}")
     df = None
 
+# Lưu lại file Excel
 def save_to_excel():
     try:
         df.to_excel(file_path, index=False)
@@ -41,6 +34,7 @@ def save_to_excel():
     except Exception as e:
         st.error(f"Error saving Excel file: {str(e)}")
 
+# Kiểm tra mã barcode
 def check_barcode(barcode_data):
     if df is None:
         st.error("Excel data not loaded!")
@@ -65,23 +59,43 @@ def check_barcode(barcode_data):
         st.error(f"Error processing barcode: {str(e)}")
         return None
 
-# Streamlit UI
-st.title("Asset Inventory Scanner")
+# Bộ xử lý video để quét barcode
+class BarcodeScanner(VideoTransformerBase):
+    def transform(self, frame):
+        img = frame.to_ndarray(format="bgr24")
+        barcodes = decode(img)
+        for barcode in barcodes:
+            x, y, w, h = barcode.rect
+            cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            barcode_data = barcode.data.decode("utf-8")
+            st.session_state["scanned_barcode"] = barcode_data
+        return img
+
+# Giao diện Streamlit
+st.title("📱 Asset Inventory Scanner")
 
 if check_excel_file():
-    barcode_input = st.text_input("Nhập mã barcode:")
-    uploaded_file = st.file_uploader("Hoặc tải lên hình ảnh barcode", type=["png", "jpg", "jpeg"])
+    barcode_input = st.text_input("🔍 Nhập mã barcode:")
+    uploaded_file = st.file_uploader("📷 Hoặc tải lên hình ảnh barcode", type=["png", "jpg", "jpeg"])
     
     if uploaded_file is not None:
         image = Image.open(uploaded_file)
         barcodes = decode(image)
         if barcodes:
             barcode_input = barcodes[0].data.decode("utf-8")
-            st.success(f"Scanned Barcode: {barcode_input}")
+            st.success(f"✅ Scanned Barcode: {barcode_input}")
         else:
-            st.error("Không tìm thấy mã barcode trong ảnh!")
+            st.error("❌ Không tìm thấy mã barcode trong ảnh!")
     
-    if st.button("Kiểm tra"):
+    # Quét barcode từ camera
+    st.subheader("📸 Quét mã vạch bằng camera:")
+    webrtc_streamer(key="barcode-scanner", video_transformer_factory=BarcodeScanner)
+    
+    if "scanned_barcode" in st.session_state:
+        barcode_input = st.session_state["scanned_barcode"]
+        st.success(f"📌 Đã quét: {barcode_input}")
+    
+    if st.button("🔍 Kiểm tra"):
         result = check_barcode(barcode_input)
         if result is not None:
             st.success(f"✅ Barcode {barcode_input} found!")
@@ -89,6 +103,6 @@ if check_excel_file():
         else:
             st.error("❌ Barcode not found!")
     
-    # Display full data table
-    st.subheader("Danh sách tài sản:")
+    # Hiển thị danh sách tài sản
+    st.subheader("📋 Danh sách tài sản:")
     st.dataframe(df)
